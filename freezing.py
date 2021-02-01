@@ -69,15 +69,39 @@ class FreezingLayer(tf.keras.layers.Layer):
     layer.set_weights(weights)
 
 class EnableFreezing(tf.keras.callbacks.Callback):
-  def on_train_batch_begin(self, batch, logs=None):
+  def save_weights(self):
     for layer in self.model.layers:
       if isinstance(layer, FreezingLayer):
         layer.save_weights()
 
-  def on_train_batch_end(self, batch, logs=None):
+  def reset_weights(self):
     for layer in self.model.layers:
       if isinstance(layer, FreezingLayer):
         layer.reset_weights()
+
+class EnableFreezingEveryNBatches(EnableFreezing):
+  def __init__(self, N = 1):
+    self.N = N
+
+  def on_train_batch_begin(self, batch, logs=None):
+    if batch % self.N == 0:
+      self.save_weights()
+
+  def on_train_batch_end(self, batch, logs=None):
+    if batch % self.N == 0:
+      self.reset_weights()
+
+class EnableFreezingEveryNEpochs(EnableFreezing):
+  def __init__(self, N = 1):
+    self.N = N
+
+  def on_epoch_begin(self, epoch, logs=None):
+    if epoch % self.N == 0:
+      self.save_weights()
+
+  def on_epoch_end(self, epoch, logs=None):
+    if epoch % self.N == 0:
+      self.reset_weights()
 
 from tensorflow.keras.datasets import cifar10
 from tensorflow.keras import utils
@@ -103,144 +127,18 @@ model = Sequential()
 model.add(Conv2D(32, (3, 3), activation='relu', input_shape=(32, 32, 3), kernel_initializer='he_uniform')) # With 'glorot' conv layers sometimes don't learn
 model.add(MaxPooling2D(pool_size=(2, 2)))
 model.add(Flatten())
-model.add(FreezingLayer(0.2, Dense(150, activation='relu')))
+model.add(FreezingLayer(1.0, Dense(150, activation='relu')))
 # model.add(Dense(150, activation='relu'))
-model.add(FreezingLayer(0.5, Dense(120, activation='relu')))
+model.add(FreezingLayer(1.0, Dense(120, activation='relu')))
 # model.add(Dense(120, activation='relu'))
-model.add(Dense(num_classes, activation='softmax'))
+model.add(FreezingLayer(1.0, Dense(num_classes, activation='softmax')))
 
 model.compile(loss=tf.keras.losses.categorical_crossentropy,
                     optimizer=tf.keras.optimizers.Adam(),
                     metrics=['accuracy'])
 
-model.fit(x_train, y_train, batch_size=128, epochs=5, callbacks=[EnableFreezing()]) 
+model.fit(x_train, y_train, batch_size=32, epochs=5, callbacks=[EnableFreezingEveryNEpochs()]) 
 train_score = model.evaluate(x_train, y_train, verbose=0)
 test_score = model.evaluate(x_test, y_test, verbose=0)
 
 print(train_score, test_score)
-
-from tensorflow.keras.datasets import cifar10
-from tensorflow.keras import utils
-from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPooling2D
-import numpy as np
-import tensorflow as tf
-
-# od pani prof.
-class FreezingSequential(Sequential):
-    def __init__(self, percent_of_frozen_neurons):
-        super().__init__()
-        self.percent_of_frozen_neurons = percent_of_frozen_neurons
-
-    def fit(self,
-            x=None,
-            y=None,
-            batch_size=32,
-            epochs=1,
-            verbose=1,
-            shuffle=False):
-
-            size = len(y)
-            if shuffle:
-                idxs = np.random.permutation(size)
-                x,y = x[idxs], y[idxs]
-               
-            if batch_size == None:
-                batch_size = size
-
-            for _ in range(epochs):
-                batch_epochs = int(np.ceil(size / batch_size))
-                self.train_epoch(x, y, range(batch_epochs), batch_size)
-
-    def train_epoch(self, x, y, rounds, batch_size):
-        for be in rounds:
-            batch_xs = x[be*batch_size : (be+1)*batch_size]
-            batch_ys = y[be*batch_size : (be+1)*batch_size]
-            self.train_batch(batch_xs, batch_ys, batch_size)
-
-    def train_batch(self, batch_xs, batch_ys, batch_size):
-        old_weights, masks = self.pick_old_weights_and_masks(self.get_weights())
-        super().fit(batch_xs, batch_ys, batch_size, epochs=1, verbose=0, shuffle=False)
-        self.set_weights(self.get_new_weights(self.get_weights(), old_weights, masks))
-
-    def pick_old_weights_and_masks(self, weights):
-        old_weights = []
-        masks = []
-        for matrix in weights:
-            mask = np.random.rand(*matrix.shape) < self.percent_of_frozen_neurons
-            old_weights.append(matrix[mask])
-            masks.append(mask)
-        return old_weights, masks
-
-    def get_new_weights(self, current_weights, old_weights, masks):
-        new_weights = []
-        for current, old, mask in zip(current_weights, old_weights, masks):
-            current[mask] = old
-            new_weights.append(current)
-        return new_weights
-       
-class Cifar_builder:
-    def compile(self, model, optimizer):
-        model.compile(loss=tf.keras.losses.categorical_crossentropy,
-                    optimizer=optimizer,
-                    metrics=['accuracy'])
-        return model
-         
-    def build(self, model, num_classes, optimizer, drop_rate = 0):
-        model.add(Conv2D(32, (3, 3), activation='relu', input_shape=(32, 32, 3), kernel_initializer='he_uniform')) # Bo z 'glorot'em, warstwy conv czasami sie nie ucza.
-        model.add(Conv2D(32, (3, 3), activation='relu', kernel_initializer='he_uniform'))
-        model.add(MaxPooling2D(pool_size=(2, 2)))
-        model.add(Dropout(0.3))
-
-        model.add(Conv2D(64, (3, 3), activation='relu', kernel_initializer='he_uniform'))
-        model.add(Conv2D(64, (3, 3), activation='relu', kernel_initializer='he_uniform'))
-        model.add(MaxPooling2D(pool_size=(2, 2)))
-        model.add(Dropout(0.4))
-
-        model.add(Flatten())
-        model.add(FreezingLayer(0.8, Dense(512, activation='relu'))) #zmiana  model.add(Dense(512, activation='relu'))
-        model.add(Dropout(0.5))
-        model.add(FreezingLayer(0.8, Dense(512, activation='relu'))
-        model.add(Dropout(0.5))
-        model.add(FreezingLayer(0.8, Dense(num_classes, activation='softmax')))
-                           
-        return self.compile(model, optimizer)
-       
-def train(model, num_epochs, x_train, y_train, x_test, y_test):
-    for epoch in range(num_epochs):
-        model.fit(x_train, y_train, batch_size=32, epochs=1, verbose=0, shuffle=True, callbacks=[EnableFreezing()]) #zmiana
-        train_score = model.evaluate(x_train, y_train, verbose=0)
-        test_score = model.evaluate(x_test, y_test, verbose=0)
-        print('Epoch:', epoch + 1, ', Train | Test : ', train_score[1], ' | ', test_score[1])
-    print()
-                   
-def run_freezing_tests(x_train, x_test, y_train, y_test, builder, num_classes, num_epochs):
-    optimizer ='adam'
-    print(', optimizer: ', optimizer.__class__.__name__, ', freezing rate: ', rate)
-    for _ in repeats:
-        model = builder.build(Sequential(), num_classes, optimizer) #zmiana model = builder.build(FreezingSequential(rate), num_classes, optimizer)
-        train(model, num_epochs, x_train, y_train, x_test, y_test)
-
-def run_dropout_test(x_train, x_test, y_train, y_test, builder, num_classes, num_epochs):
-    optimizer = SGD()
-    print(', optimizer: ', optimizer.__class__.__name__, ', drop rate: ', rate)
-    for _ in repeats:
-        model = builder.build(Sequential(), num_classes, optimizer, drop_rate=rate)
-        train(model, num_epochs, x_train, y_train, x_test, y_test)
-
-def run_tests(x_train, x_test, y_train, y_test, builder, num_classes, num_epochs):
-    run_freezing_tests(x_train, x_test, y_train, y_test, builder, num_classes, num_epochs)
-   
-rate  = 0.85 #0.1, 0.2, 0.3, 0.5]
-repeats = range(1)
-num_classes = 10
-num_epochs = 200
-
-(x_train, y_train), (x_test, y_test) = cifar10.load_data()
-x_train = x_train.astype('float32') / 255
-x_test = x_test.astype('float32') / 255
-
-y_train = tf.keras.utils.to_categorical(y_train, num_classes)
-y_test = tf.keras.utils.to_categorical(y_test, num_classes)
-
-run_tests(x_train, x_test, y_train, y_test, Cifar_builder(), num_classes, num_epochs)
