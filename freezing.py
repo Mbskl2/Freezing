@@ -17,9 +17,7 @@ tf.test.gpu_device_name() # is GPU working
 """TODO:
 
 
-1.   Dodać obsługę wymrażania co epokę, co batch itd.
-2.   Dodać możliwość wymrażania co kilka epoko itp.
-3.   Dodać obsługę warstw konwolucyjnych.
+1.   Dodać obsługę warstw konwolucyjnych.
 
 
 """
@@ -69,6 +67,10 @@ class FreezingLayer(tf.keras.layers.Layer):
     layer.set_weights(weights)
 
 class EnableFreezing(tf.keras.callbacks.Callback):
+  def __init__(self, N = 1):
+    assert N > 0, "The N parameter has to be a positive integer."
+    self.N = N
+
   def save_weights(self):
     for layer in self.model.layers:
       if isinstance(layer, FreezingLayer):
@@ -79,29 +81,24 @@ class EnableFreezing(tf.keras.callbacks.Callback):
       if isinstance(layer, FreezingLayer):
         layer.reset_weights()
 
+  def on_train_batch_end(self, batch, logs=None):
+    self.reset_weights()
+
 class EnableFreezingEveryNBatches(EnableFreezing):
   def __init__(self, N = 1):
-    self.N = N
+    super().__init__(N)
 
   def on_train_batch_begin(self, batch, logs=None):
     if batch % self.N == 0:
       self.save_weights()
 
-  def on_train_batch_end(self, batch, logs=None):
-    if batch % self.N == 0:
-      self.reset_weights()
-
 class EnableFreezingEveryNEpochs(EnableFreezing):
   def __init__(self, N = 1):
-    self.N = N
+    super().__init__(N)
 
   def on_epoch_begin(self, epoch, logs=None):
     if epoch % self.N == 0:
       self.save_weights()
-
-  def on_epoch_end(self, epoch, logs=None):
-    if epoch % self.N == 0:
-      self.reset_weights()
 
 from tensorflow.keras.datasets import cifar10
 from tensorflow.keras import utils
